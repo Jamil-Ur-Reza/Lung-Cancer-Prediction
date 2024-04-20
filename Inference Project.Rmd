@@ -1,0 +1,424 @@
+---
+title: "Inference Project"
+author: "Jamil Ur Reza"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+```{r}
+packages <- c("pROC", "caret", "knitr")
+# Install packages if needed
+for (package in packages)
+{
+  # Try loading the library.
+  if ( ! library(package, logical.return=TRUE, character.only=TRUE) )
+  {
+    # If the library cannot be loaded, install it; then load.
+    install.packages(package)
+    library(package, character.only=TRUE)
+  }
+}
+```
+# Data Preprocessing
+```{r}
+data <- read.csv("survey_lung_cancer.csv")
+head(data)
+```
+
+```{r}
+# Encoding the categorical data
+data$GENDER <- ifelse(data$GENDER == "F", 0, 1)
+# Replace "No" with 0 and "Yes" with 1 in the LUNG_CANCER column
+data$LUNG_CANCER <- ifelse(data$LUNG_CANCER == "NO", 0, 
+                            ifelse(data$LUNG_CANCER == "YES", 1, NA))
+
+
+head(data)
+```
+
+```{r}
+unique_values <- lapply(data, unique)         # Find unique values in all columns
+names(unique_values) <- names(data)            # Name list elements with corresponding column names
+print(unique_values)
+```
+# Jackknife Resampling Technique
+```{r}
+# Setting the seed for reproducibility
+set.seed(729054)
+
+# Define the number of folds for cross-validation
+num_folds <- 5
+
+
+# Function to fit logistic regression model and obtain coefficients
+fit_logistic <- function(train_data, validation_data) {
+  model <- glm(LUNG_CANCER ~ ., data = train_data, family = binomial)
+  coefficients(model)
+}
+```
+
+```{r}
+# Split the data into predictors (X) and outcome (Y)
+X <- subset(data, select = -LUNG_CANCER)
+Y <- data$LUNG_CANCER
+```
+
+```{r}
+# Initialize a list to store the indices of the data for each fold
+fold_indices <- vector("list", length = nrow(data))
+```
+
+```{r}
+# Define the number of folds for Jackknife resampling
+num_folds <- nrow(data)
+```
+
+
+```{r}
+# Split data into folds for Jackknife resampling
+for (i in 1:nrow(data)) {
+  # Calculate the indices for the current fold
+  fold_indices[[i]] <- setdiff(1:nrow(data), i)
+}
+```
+
+```{r}
+# Initializing vectors to store coefficient estimates
+coefficients_list <- vector("list", length = num_folds)
+```
+
+```{r}
+# Perform Jackknife resampling
+for (i in 1:num_folds) {
+  # Create training data by excluding the current observation
+  train_data <- data[-i, ]
+  
+  # Fit logistic regression model and obtain coefficients
+  model <- glm(LUNG_CANCER ~ ., data = train_data, family = binomial)
+  coefficients_list[[i]] <- coefficients(model)
+}
+```
+
+```{r}
+# Compute the average value of the estimates to obtain the final estimate
+final_coefficients <- colMeans(do.call(rbind, coefficients_list))
+
+# Display the final estimate
+print(final_coefficients)
+```
+
+```{r}
+# Split the data into training and test sets
+train_indices <- createDataPartition(Y, p = 0.8, list = FALSE)
+train_data <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+```
+
+```{r}
+# Fit logistic regression model on the training data using the final coefficients
+final_model <- glm(LUNG_CANCER ~ ., data = train_data, family = binomial, start = final_coefficients)
+
+# Predict probabilities on the test data
+predictions <- predict(final_model, newdata = test_data, type = "response")
+
+# Convert probabilities to binary predictions (0 or 1)
+binary_predictions <- ifelse(predictions > 0.4, 1, 0)
+```
+
+```{r}
+# Compute evaluation metrics
+confusion_matrix <- table(test_data$LUNG_CANCER, binary_predictions)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Display evaluation metrics
+cat("Confusion Matrix:\n")
+print(confusion_matrix)
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1-Score:", f1_score, "\n")
+```
+**Jackknife Bias Estimate**
+```{r}
+# Function to perform Jackknife resampling and calculate bias estimate
+jackknife_bias_estimate <- function(data) {
+  # Fit the logistic regression model on the entire dataset
+  full_model <- glm(LUNG_CANCER ~ ., data = data, family = binomial)
+  
+  # Get the coefficient estimates of the full model
+  full_coefficients <- coef(full_model)
+  
+  # Initialize a vector to store the bias estimates
+  bias_estimates <- numeric(length(full_coefficients))
+  
+  # Perform Jackknife resampling
+  for (i in 1:length(full_coefficients)) {
+    # Leave out the ith observation
+    leave_out_data <- data[-i, ]
+    
+    # Fit the logistic regression model on the data with the ith observation left out
+    leave_out_model <- glm(LUNG_CANCER ~ ., data = leave_out_data, family = binomial)
+    
+    # Get the coefficient estimates of the model with the ith observation left out
+    leave_out_coefficients <- coef(leave_out_model)
+    
+    # Calculate the bias estimate for the ith coefficient
+    bias_estimates[i] <- leave_out_coefficients[i] - full_coefficients[i]
+  }
+  
+  # Return the bias estimates
+  return(bias_estimates)
+}
+
+# Calculate the bias estimate for Jackknife resampling
+jackknife_bias <- jackknife_bias_estimate(train_data)
+print(jackknife_bias)
+```
+
+
+
+
+
+
+
+# Bootstrap Resampling Technique
+
+```{r}
+# Set the seed for reproducibility
+set.seed(729054)
+
+# Define the number of bootstrap samples
+num_bootstraps <- 1000
+
+# Define the number of folds for cross-validation
+num_folds <- 5
+```
+
+```{r}
+# Function to fit logistic regression model and obtain coefficients
+fit_logistic <- function(train_data, validation_data) {
+  model <- glm(LUNG_CANCER ~ ., data = train_data, family = binomial)
+  coefficients(model)
+}
+```
+
+```{r}
+# Initializing a list to store coefficient estimates
+bootstrap_coefficients <- vector("list", length = num_bootstraps)
+```
+
+```{r}
+# Perform bootstrap resampling
+for (i in 1:num_bootstraps) {
+  # Generate bootstrap sample
+  bootstrap_indices <- sample(nrow(data), replace = TRUE)
+  bootstrap_data <- data[bootstrap_indices, ]
+  
+  # Split data into training and validation sets for cross-validation
+  fold_indices <- createFolds(bootstrap_data$LUNG_CANCER, k = num_folds)
+  
+  # Initialize vectors to store coefficient estimates for each fold
+  fold_coefficients <- vector("list", length = num_folds)
+  
+  # Perform cross-validation
+  for (fold in 1:num_folds) {
+    # Create training and validation sets
+    validation_indices <- fold_indices[[fold]]
+    train_indices <- setdiff(seq_len(nrow(bootstrap_data)), validation_indices)
+    
+    train_data <- bootstrap_data[train_indices, ]
+    validation_data <- bootstrap_data[validation_indices, ]
+    
+    # Fit logistic regression model and obtain coefficients
+    fold_coefficients[[fold]] <- fit_logistic(train_data, validation_data)
+  }
+  
+  # Compute the average value of the estimates to obtain the final estimate
+  bootstrap_coefficients[[i]] <- colMeans(do.call(rbind, fold_coefficients))
+}
+```
+
+```{r}
+# Compute the average value of the estimates to obtain the final estimate
+final_coefficients <- colMeans(do.call(rbind, bootstrap_coefficients))
+
+# Display the final estimate
+print(final_coefficients)
+```
+
+```{r}
+# Split the data into training and test sets
+train_indices <- createDataPartition(data$LUNG_CANCER, p = 0.8, list = FALSE)
+train_data <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+```
+
+```{r}
+# Fit logistic regression model on the training data using the final coefficients
+final_model <- glm(LUNG_CANCER ~ ., data = train_data, family = binomial, start = final_coefficients)
+
+# Predict probabilities on the test data
+predictions <- predict(final_model, newdata = test_data, type = "response")
+
+# Convert probabilities to binary predictions (0 or 1)
+binary_predictions <- ifelse(predictions > 0.4, 1, 0)
+```
+
+```{r}
+# Compute evaluation metrics
+confusion_matrix <- table(test_data$LUNG_CANCER, binary_predictions)
+accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+f1_score <- 2 * (precision * recall) / (precision + recall)
+
+# Display evaluation metrics
+cat("Confusion Matrix:\n")
+print(confusion_matrix)
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1-Score:", f1_score, "\n")
+```
+
+**Bootstrap Bias Estimate**
+```{r}
+# Function to perform Bootstrap resampling and calculate bias estimate
+bootstrap_bias_estimate <- function(data, num_bootstraps) {
+  # Fit the logistic regression model on the entire dataset
+  full_model <- glm(LUNG_CANCER ~ ., data = data, family = binomial)
+  
+  # Get the coefficient estimates of the full model
+  full_coefficients <- coef(full_model)
+  
+  # Initialize a matrix to store the coefficient estimates from each bootstrap sample
+  bootstrap_coefficients <- matrix(NA, nrow = num_bootstraps, ncol = length(full_coefficients))
+  
+  # Perform Bootstrap resampling
+  for (i in 1:num_bootstraps) {
+    # Sample with replacement from the data
+    bootstrap_sample <- data[sample(nrow(data), replace = TRUE), ]
+    
+    # Fit the logistic regression model on the Bootstrap sample
+    bootstrap_model <- glm(LUNG_CANCER ~ ., data = bootstrap_sample, family = binomial)
+    
+    # Get the coefficient estimates of the Bootstrap model
+    bootstrap_coefficients[i, ] <- coef(bootstrap_model)
+  }
+  
+  # Calculate the bias estimate for each coefficient
+  bias_estimates <- apply(bootstrap_coefficients, 2, mean) - full_coefficients
+  
+  # Return the bias estimates
+  return(bias_estimates)
+}
+
+# Set the number of Bootstrap resamples
+num_bootstraps <- 1000
+
+# Calculate the bias estimate for Bootstrap resampling
+bootstrap_bias <- bootstrap_bias_estimate(train_data, num_bootstraps)
+print(bootstrap_bias)
+```
+
+
+
+
+# Permutation Test
+
+```{r}
+# Function to compute performance metrics (Accuracy, Precision, Recall, F1-Score) for a given model and dataset
+compute_metrics <- function(model, data) {
+  # Predict probabilities
+  predictions <- predict(model, newdata = data, type = "response")
+  # Convert probabilities to binary predictions (0 or 1)
+  binary_predictions <- ifelse(predictions > 0.4, 1, 0)
+  # Compute confusion matrix
+  confusion_matrix <- table(data$LUNG_CANCER, binary_predictions)
+  # Compute Accuracy
+  accuracy <- sum(diag(confusion_matrix)) / sum(confusion_matrix)
+  # Compute Precision
+  precision <- confusion_matrix[2, 2] / sum(confusion_matrix[, 2])
+  # Compute Recall
+  recall <- confusion_matrix[2, 2] / sum(confusion_matrix[2, ])
+  # Compute F1-Score
+  f1_score <- 2 * (precision * recall) / (precision + recall)
+  # Return the metrics
+  return(list(Accuracy = accuracy, Precision = precision, Recall = recall, F1_Score = f1_score))
+}
+```
+
+```{r}
+# Function to perform permutation test
+permutation_test <- function(model1, model2, data, num_permutations) {
+  # Compute observed differences in performance metrics between the two models
+  observed_metrics_model1 <- compute_metrics(model1, data)
+  observed_metrics_model2 <- compute_metrics(model2, data)
+  observed_differences <- sapply(names(observed_metrics_model1), function(metric) {
+    observed_metrics_model1[[metric]] - observed_metrics_model2[[metric]]
+  })
+  
+  # Initialize matrix to store permutation test results
+  permutation_results <- matrix(NA, nrow = num_permutations, ncol = length(observed_differences))
+  
+  # Perform permutations
+  for (i in 1:num_permutations) {
+    # Randomly shuffle the indices of the data
+    shuffled_indices <- sample(nrow(data))
+    
+    # Create shuffled data
+    shuffled_data <- data[shuffled_indices, ]
+    
+    # Fit models on shuffled data
+    shuffled_model1 <- glm(LUNG_CANCER ~ ., data = shuffled_data, family = binomial)
+    shuffled_model2 <- glm(LUNG_CANCER ~ ., data = shuffled_data, family = binomial)
+    
+    # Compute performance metrics for shuffled models
+    shuffled_metrics_model1 <- compute_metrics(shuffled_model1, data)
+    shuffled_metrics_model2 <- compute_metrics(shuffled_model2, data)
+    
+    # Compute differences in performance metrics for shuffled models
+    shuffled_differences <- sapply(names(observed_metrics_model1), function(metric) {
+      shuffled_metrics_model1[[metric]] - shuffled_metrics_model2[[metric]]
+    })
+    
+    # Store the differences in the permutation results matrix
+    permutation_results[i, ] <- shuffled_differences
+  }
+  
+  # Compute p-values for each metric
+  p_values <- sapply(1:length(observed_differences), function(i) {
+    sum(permutation_results[, i] >= observed_differences[i]) / num_permutations
+  })
+  
+  # Return the p-values
+  return(p_values)
+}
+```
+
+```{r}
+# Set the seed for reproducibility
+set.seed(729054)
+
+train_indices <- createDataPartition(data$LUNG_CANCER, p = 0.8, list = FALSE)
+train_data <- data[train_indices, ]
+test_data <- data[-train_indices, ]
+
+```
+
+```{r}
+# Fit models (replace with your Jackknife and Bootstrap models)
+jackknife_model <- glm(LUNG_CANCER ~ ., data = train_data, family = binomial)
+bootstrap_model <- glm(LUNG_CANCER ~ ., data = train_data, family = binomial)
+
+# Perform permutation test
+num_permutations <- 1000
+p_values <- permutation_test(jackknife_model, bootstrap_model, test_data, num_permutations)
+
+# Display the p-values for each metric
+cat("Permutation Test p-values:\n")
+print(p_values)
+```
+
